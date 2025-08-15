@@ -149,11 +149,15 @@ devSpan.textContent=deviceId
 
 let myKeys=null
 let sharedReady=false
-let msgKey=null
+let msgKey=null  // 保留用于向后兼容
 let regKey=null
 let authKey=null
 let roomName=null
 let userName=null
+
+// 多设备密钥管理
+let deviceKeys=new Map()  // deviceId -> {msgKey, regKey, ready}
+let connectedDevices=new Set()  // 已连接的设备ID集合
 
 async function derivePBKDF2Key(password, salt, usage, length=32){
   const base=await crypto.subtle.importKey("raw", te(password), "PBKDF2", false, ["deriveBits","deriveKey"])
@@ -373,9 +377,23 @@ async function onPeerKey(payload){
   console.log("MAC验证成功，开始密钥协商...")
   const pub=await importRawPub(peerPub)
   const secret=await deriveECDHBits(myKeys.privateKey, pub)
-  msgKey=await hkdfToAesGcm(secret, "salt:"+roomName, "msg")
-  regKey=await hkdfToAesGcm(secret, "salt:"+roomName, "registry")
-  sharedReady=true
+  const deviceMsgKey=await hkdfToAesGcm(secret, "salt:"+roomName, "msg")
+  const deviceRegKey=await hkdfToAesGcm(secret, "salt:"+roomName, "registry")
+  
+  // 为每个设备存储独立的密钥
+  deviceKeys.set(payload.deviceId, {
+    msgKey: deviceMsgKey,
+    regKey: deviceRegKey,
+    ready: true
+  })
+  connectedDevices.add(payload.deviceId)
+  
+  // 向后兼容：第一个设备的密钥作为默认密钥
+  if(!sharedReady) {
+    msgKey = deviceMsgKey
+    regKey = deviceRegKey
+    sharedReady = true
+  }
   
   // 强制隐藏等待提示
   if(waitingMessage) {
@@ -383,8 +401,9 @@ async function onPeerKey(payload){
     console.log("强制隐藏等待提示")
   }
   
-  console.log("密钥协商完成, sharedReady =", sharedReady, "与设备:", payload.deviceId)
-  addMsg(`<span class="sys">与设备 ${payload.deviceId} 建立安全连接</span>`)
+  console.log("密钥协商完成，已连接设备:", Array.from(connectedDevices))
+  console.log("与设备", payload.deviceId, "建立密钥，总连接数:", connectedDevices.size)
+  addMsg(`<span class="sys">与设备 ${payload.deviceId} 建立安全连接 (${connectedDevices.size}/${connectedDevices.size + 1})</span>`)
   
   // 发送确认消息，确保对方也知道连接已建立
   ioClient.emit("ready", { room: roomName, deviceId })
@@ -462,9 +481,9 @@ document.addEventListener("keydown",e=>{
   }
 })
 $("#send").onclick=async ()=>{
-  console.log("点击发送，当前状态: sharedReady =", sharedReady)
-  if(!sharedReady) {
-    console.log("发送失败: sharedReady =", sharedReady)
+  console.log("点击发送，当前状态: sharedReady =", sharedReady, "已连接设备:", Array.from(connectedDevices), "设备密钥数:", deviceKeys.size)
+  if(!sharedReady && connectedDevices.size === 0) {
+    console.log("发送失败: 无连接设备，sharedReady =", sharedReady, "connectedDevices =", connectedDevices.size)
     addMsg(`<span class="sys">请等待其他人加入房间后再发送消息</span>`)
     return
   }
@@ -502,21 +521,62 @@ ioClient.on("ready", payload => {
 })
 ioClient.on("msg",async m=>{
   console.log("收到消息:", m)
-  if(!sharedReady) {
-    console.log("消息处理失败: sharedReady =", sharedReady)
+  if(!sharedReady && connectedDevices.size === 0) {
+    console.log("消息处理失败: 无可用密钥")
     return
   }
-  try{
-    console.log("尝试解密消息...")
-    const plain=await decrypt(msgKey, m.c, m.iv)
-    console.log("解密成功:", plain)
-    const dt=new Date(m.ts)
-    const hh=String(dt.getHours()).padStart(2,"0"), mm=String(dt.getMinutes()).padStart(2,"0")
-    addMsg(`<span class="meta">[${hh}:${mm}]</span> <b>${m.from}</b>: ${escapeHtml(plain)}`, m.from===deviceId?"me":"")
-    await updateLedger()
-  }catch(e){
-    console.error("消息解密失败:", e)
+  
+  // 尝试用发送者的专用密钥解密
+  if(deviceKeys.has(m.from)) {
+    try{
+      console.log("尝试用设备", m.from, "的专用密钥解密...")
+      const deviceKey = deviceKeys.get(m.from).msgKey
+      const plain=await decrypt(deviceKey, m.c, m.iv)
+      console.log("专用密钥解密成功:", plain)
+      const dt=new Date(m.ts)
+      const hh=String(dt.getHours()).padStart(2,"0"), mm=String(dt.getMinutes()).padStart(2,"0")
+      addMsg(`<span class="meta">[${hh}:${mm}]</span> <b>${m.from}</b>: ${escapeHtml(plain)}`, m.from===deviceId?"me":"")
+      await updateLedger()
+      return
+    }catch(e){
+      console.log("专用密钥解密失败:", e)
+    }
   }
+  
+  // 如果专用密钥失败，尝试所有可用密钥
+  for(const [deviceId, keyData] of deviceKeys) {
+    try{
+      console.log("尝试用设备", deviceId, "的密钥解密...")
+      const plain=await decrypt(keyData.msgKey, m.c, m.iv)
+      console.log("解密成功 (设备", deviceId, "):", plain)
+      const dt=new Date(m.ts)
+      const hh=String(dt.getHours()).padStart(2,"0"), mm=String(dt.getMinutes()).padStart(2,"0")
+      addMsg(`<span class="meta">[${hh}:${mm}]</span> <b>${m.from}</b>: ${escapeHtml(plain)}`, m.from===deviceId?"me":"")
+      await updateLedger()
+      return
+    }catch(e){
+      console.log("设备", deviceId, "密钥解密失败")
+    }
+  }
+  
+  // 最后尝试默认密钥（向后兼容）
+  if(msgKey) {
+    try{
+      console.log("尝试用默认密钥解密...")
+      const plain=await decrypt(msgKey, m.c, m.iv)
+      console.log("默认密钥解密成功:", plain)
+      const dt=new Date(m.ts)
+      const hh=String(dt.getHours()).padStart(2,"0"), mm=String(dt.getMinutes()).padStart(2,"0")
+      addMsg(`<span class="meta">[${hh}:${mm}]</span> <b>${m.from}</b>: ${escapeHtml(plain)}`, m.from===deviceId?"me":"")
+      await updateLedger()
+      return
+    }catch(e){
+      console.log("默认密钥解密失败")
+    }
+  }
+  
+  console.error("所有密钥解密失败，无法解密来自", m.from, "的消息")
+  addMsg(`<span class="sys">收到来自 ${m.from} 的加密消息，但无法解密</span>`)
 })
 
 function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
