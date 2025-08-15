@@ -253,7 +253,24 @@ async function joinRoom(room, password, name, errorEl, isCreate=false){
     myKeys=await genECDH()
     const myPub=await exportRawPub(myKeys)
     const mac=await hmacSign(authKey, new Uint8Array([...te("key:"),...new Uint8Array(myPub),...te(room)]))
+    console.log("发送公钥到房间:", room, "设备ID:", deviceId)
     ioClient.emit("pubkey",{ room, pub:b64(myPub), mac:b64(mac), deviceId })
+    
+    // 延迟重发一次公钥，确保后加入的用户能收到
+    setTimeout(() => {
+      console.log("重发公钥确保同步")
+      ioClient.emit("pubkey",{ room, pub:b64(myPub), mac:b64(mac), deviceId })
+    }, 1000)
+    
+    // 5秒后检查连接状态，如果仍未建立连接则显示提示
+    setTimeout(() => {
+      if(!sharedReady && waitingMessage.style.display !== "none") {
+        console.log("5秒后仍未建立连接，添加重试提示")
+        addMsg(`<span class="sys">正在等待密钥交换完成...</span>`)
+        // 再次重发公钥
+        ioClient.emit("pubkey",{ room, pub:b64(myPub), mac:b64(mac), deviceId })
+      }
+    }, 5000)
     try {
       const r=await fetch("/registry/"+encodeURIComponent(room))
       if(r.ok){
@@ -330,6 +347,8 @@ function hideSecurityModal(){
 
 async function onPeerKey(payload){
   console.log("收到对方公钥:", payload)
+  console.log("当前状态 - myKeys存在:", !!myKeys, "roomName:", roomName, "deviceId:", deviceId, "sharedReady:", sharedReady)
+  
   if(!myKeys) {
     console.log("密钥交换失败: myKeys 不存在")
     return
@@ -339,9 +358,11 @@ async function onPeerKey(payload){
     return
   }
   if(payload.deviceId === deviceId) {
-    console.log("忽略自己的公钥")
+    console.log("忽略自己的公钥，设备ID:", payload.deviceId)
     return
   }
+  
+  console.log("开始处理来自设备", payload.deviceId, "的公钥")
   const peerPub=ub64(payload.pub)
   const macData=new Uint8Array([...te("key:"),...new Uint8Array(peerPub),...te(roomName)])
   const ok=await hmacVerify(authKey, ub64(payload.mac), macData)
@@ -447,9 +468,12 @@ ioClient.on("system",t=>addMsg(`<span class="sys">${t}</span>`))
 ioClient.on("pubkey",onPeerKey)
 ioClient.on("ready", payload => {
   console.log("收到对方ready确认:", payload)
-  if(payload.room === roomName && sharedReady) {
+  if(payload.room === roomName) {
     waitingMessage.style.display="none"
     console.log("双方连接确认完成")
+    if(!sharedReady) {
+      console.log("对方已准备就绪，但本地sharedReady仍为false，可能存在密钥交换问题")
+    }
   }
 })
 ioClient.on("msg",async m=>{
