@@ -94,6 +94,13 @@ io.on("connection", socket => {
     io.to(room).emit("pubkey", payload)
   })
 
+  socket.on("groupkey", payload => {
+    const room = socket.data.room
+    if (!room) return
+    // 转发群组密钥给指定设备
+    io.to(room).emit("groupkey", payload)
+  })
+
   socket.on("msg", payload => {
     const room = socket.data.room
     if (!room) return
