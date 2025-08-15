@@ -26,9 +26,8 @@ button{cursor:pointer}
 .tab-content.active{display:block}
 .generate-btn{background:#7aa2f7;color:#0b0c10;border:1px solid #7aa2f7}
 .generate-btn:hover{background:#9bb9f7}
-.room-info{background:#0f1115;border:1px solid #2a2f37;border-radius:12px;padding:12px;margin:8px 0}
-.copy-btn{background:#7bd389;color:#0b0c10;border:1px solid #7bd389;padding:8px 12px;font-size:0.9em}
-.copy-btn:hover{background:#8ee396}
+
+
 .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);display:none;justify-content:center;align-items:center;z-index:1000}
 .modal-content{background:#15171c;border:1px solid #22252b;border-radius:16px;padding:24px;max-width:500px;width:90%;position:relative}
 .modal-header{font-size:1.2em;font-weight:bold;margin-bottom:16px;color:#7aa2f7}
@@ -67,12 +66,6 @@ button{cursor:pointer}
           <button id="generate" class="generate-btn">生成随机房间</button>
           <button id="create-enter">创建并进入</button>
           <div id="create-err" class="meta"></div>
-          <div id="room-info" class="room-info" style="display:none">
-            <div class="small">房间信息：</div>
-            <div>房间号：<span id="generated-room"></span> <button id="copy-room" class="copy-btn">复制</button></div>
-            <div>密码：<span id="generated-pass"></span> <button id="copy-pass" class="copy-btn">复制</button></div>
-            <div class="small" style="margin-top:8px">请将房间号和密码分享给其他人</div>
-          </div>
         </div>
       </div>
       
@@ -124,7 +117,7 @@ button{cursor:pointer}
 const $=s=>document.querySelector(s)
 const gate=$("#gate"),chat=$("#chat"),list=$("#list"),err=$("#err"),ledgerBox=$("#ledger")
 const devSpan=$("#mydev")
-const createErr=$("#create-err"),roomInfo=$("#room-info")
+const createErr=$("#create-err")
 const securityModal=$("#security-modal")
 const ioClient=io()
 const te=s=>new TextEncoder().encode(s)
@@ -267,6 +260,8 @@ async function createRoom(){
   const name=$("#create-name").value.trim()
   if(!password||!name){createErr.textContent="请设置密码和昵称";return}
   
+  createErr.textContent=""
+  
   if(!room){
     let attempts=0
     do {
@@ -288,9 +283,6 @@ async function createRoom(){
   }
   
   $("#create-room").value=room
-  $("#generated-room").textContent=room
-  $("#generated-pass").textContent=password
-  roomInfo.style.display="block"
   await joinRoom(room, password, name, createErr, true)
 }
 
@@ -355,8 +347,7 @@ document.querySelectorAll(".tab").forEach(tab=>{
 $("#enter").onclick=startJoin
 $("#create-enter").onclick=createRoom
 $("#generate").onclick=generateRoom
-$("#copy-room").onclick=()=>navigator.clipboard.writeText($("#generated-room").textContent)
-$("#copy-pass").onclick=()=>navigator.clipboard.writeText($("#generated-pass").textContent)
+
 $("#close-security-modal").onclick=hideSecurityModal
 
 securityModal.onclick=(e)=>{
