@@ -75,6 +75,9 @@ button{cursor:pointer}
       <div class="small">曾登录的设备编号：</div>
       <div id="ledger" class="ledger"></div>
       <div id="list"></div>
+      <div id="waiting-message" style="display:none;padding:12px;text-align:center;color:#7aa2f7;font-style:italic;">
+        等待其他人加入房间...
+      </div>
       <div class="row">
         <input id="text" placeholder="输入消息，回车发送" style="flex:1"/>
         <button id="send">发送</button>
@@ -119,6 +122,7 @@ const gate=$("#gate"),chat=$("#chat"),list=$("#list"),err=$("#err"),ledgerBox=$(
 const devSpan=$("#mydev")
 const createErr=$("#create-err")
 const securityModal=$("#security-modal")
+const waitingMessage=$("#waiting-message")
 const ioClient=io()
 
 ioClient.on("connect", ()=>{
@@ -242,6 +246,7 @@ async function joinRoom(room, password, name, errorEl, isCreate=false){
     userName=name
     gate.style.display="none"
     chat.style.display="flex"
+    waitingMessage.style.display="block"
     setTimeout(showSecurityModal, 500)
     const authBytes=await derivePBKDF2Bytes(password, "auth:"+room, 32)
     authKey=await importHmacKey(authBytes)
@@ -350,7 +355,9 @@ async function onPeerKey(payload){
   msgKey=await hkdfToAesGcm(secret, "salt:"+roomName, "msg")
   regKey=await hkdfToAesGcm(secret, "salt:"+roomName, "registry")
   sharedReady=true
+  waitingMessage.style.display="none"
   console.log("密钥协商完成, sharedReady =", sharedReady, "与设备:", payload.deviceId)
+  addMsg(`<span class="sys">与设备 ${payload.deviceId} 建立安全连接</span>`)
   await updateLedger()
 }
 
@@ -418,6 +425,7 @@ document.addEventListener("keydown",e=>{
 $("#send").onclick=async ()=>{
   if(!sharedReady) {
     console.log("发送失败: sharedReady =", sharedReady)
+    addMsg(`<span class="sys">请等待其他人加入房间后再发送消息</span>`)
     return
   }
   const t=$("#text").value.trim()
