@@ -266,9 +266,9 @@ async function joinRoom(room, password, name, errorEl, isCreate=false){
       console.log("作为房间创建者，生成群组密钥...")
       console.log("isRoomCreator 设置为:", isCreate)
       const groupKeyMaterial = crypto.getRandomValues(new Uint8Array(32))
-      groupMsgKey = await crypto.subtle.importKey("raw", groupKeyMaterial, "AES-GCM", false, ["encrypt", "decrypt"])
+      groupMsgKey = await crypto.subtle.importKey("raw", groupKeyMaterial, "AES-GCM", true, ["encrypt", "decrypt"])  // extractable: true
       groupRegKey = await hkdfToAesGcm(groupKeyMaterial, "salt:"+room, "registry")
-      console.log("群组密钥生成完成, groupMsgKey:", !!groupMsgKey)
+      console.log("群组密钥生成完成, groupMsgKey:", !!groupMsgKey, "extractable:", true)
       
       // 房间创建者立即设置为ready状态
       sharedReady = true
