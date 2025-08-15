@@ -506,17 +506,19 @@ $("#text").addEventListener("keydown",async e=>{ if(e.key==="Enter"){ $("#send")
 ioClient.on("system",t=>addMsg(`<span class="sys">${t}</span>`))
 ioClient.on("pubkey",onPeerKey)
 ioClient.on("ready", payload => {
-  console.log("收到对方ready确认:", payload)
-  if(payload.room === roomName) {
-    // 强制隐藏等待提示
+  console.log("收到ready确认:", payload)
+  if(payload.room === roomName && payload.deviceId !== deviceId) {
+    // 只有收到其他设备的ready确认才隐藏等待提示
     if(waitingMessage) {
       waitingMessage.style.display="none"
-      console.log("通过ready事件强制隐藏等待提示")
+      console.log("收到其他设备ready确认，隐藏等待提示，设备:", payload.deviceId)
     }
-    console.log("双方连接确认完成")
+    console.log("与设备", payload.deviceId, "连接确认完成")
     if(!sharedReady) {
       console.log("对方已准备就绪，但本地sharedReady仍为false，可能存在密钥交换问题")
     }
+  } else if(payload.deviceId === deviceId) {
+    console.log("忽略自己的ready确认")
   }
 })
 ioClient.on("msg",async m=>{
@@ -526,7 +528,23 @@ ioClient.on("msg",async m=>{
     return
   }
   
-  // 尝试用发送者的专用密钥解密
+  // 如果是自己发送的消息，用默认密钥解密
+  if(m.from === deviceId) {
+    try{
+      console.log("解密自己的消息，使用默认密钥...")
+      const plain=await decrypt(msgKey, m.c, m.iv)
+      console.log("自发消息解密成功:", plain)
+      const dt=new Date(m.ts)
+      const hh=String(dt.getHours()).padStart(2,"0"), mm=String(dt.getMinutes()).padStart(2,"0")
+      addMsg(`<span class="meta">[${hh}:${mm}]</span> <b>${m.from}</b>: ${escapeHtml(plain)}`, "me")
+      await updateLedger()
+      return
+    }catch(e){
+      console.log("自发消息解密失败:", e)
+    }
+  }
+  
+  // 尝试用发送者的专用密钥解密（其他设备的消息）
   if(deviceKeys.has(m.from)) {
     try{
       console.log("尝试用设备", m.from, "的专用密钥解密...")
@@ -535,7 +553,7 @@ ioClient.on("msg",async m=>{
       console.log("专用密钥解密成功:", plain)
       const dt=new Date(m.ts)
       const hh=String(dt.getHours()).padStart(2,"0"), mm=String(dt.getMinutes()).padStart(2,"0")
-      addMsg(`<span class="meta">[${hh}:${mm}]</span> <b>${m.from}</b>: ${escapeHtml(plain)}`, m.from===deviceId?"me":"")
+      addMsg(`<span class="meta">[${hh}:${mm}]</span> <b>${m.from}</b>: ${escapeHtml(plain)}`, "")
       await updateLedger()
       return
     }catch(e){
@@ -544,18 +562,18 @@ ioClient.on("msg",async m=>{
   }
   
   // 如果专用密钥失败，尝试所有可用密钥
-  for(const [deviceId, keyData] of deviceKeys) {
+  for(const [otherDeviceId, keyData] of deviceKeys) {
     try{
-      console.log("尝试用设备", deviceId, "的密钥解密...")
+      console.log("尝试用设备", otherDeviceId, "的密钥解密...")
       const plain=await decrypt(keyData.msgKey, m.c, m.iv)
-      console.log("解密成功 (设备", deviceId, "):", plain)
+      console.log("解密成功 (设备", otherDeviceId, "):", plain)
       const dt=new Date(m.ts)
       const hh=String(dt.getHours()).padStart(2,"0"), mm=String(dt.getMinutes()).padStart(2,"0")
       addMsg(`<span class="meta">[${hh}:${mm}]</span> <b>${m.from}</b>: ${escapeHtml(plain)}`, m.from===deviceId?"me":"")
       await updateLedger()
       return
     }catch(e){
-      console.log("设备", deviceId, "密钥解密失败")
+      console.log("设备", otherDeviceId, "密钥解密失败")
     }
   }
   
