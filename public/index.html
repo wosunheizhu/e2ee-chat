@@ -203,7 +203,7 @@ async function encrypt(key, plain){
 }
 
 async function decrypt(key, c, iv){
-  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:new Uint8Array(ub64(iv)),name:"AES-GCM"}, key, ub64(c))
+  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:new Uint8Array(ub64(iv))}, key, ub64(c))
   return td(pt)
 }
 
@@ -333,6 +333,10 @@ async function onPeerKey(payload){
     console.log("密钥交换失败: 房间不匹配", payload.room, "vs", roomName)
     return
   }
+  if(payload.deviceId === deviceId) {
+    console.log("忽略自己的公钥")
+    return
+  }
   const peerPub=ub64(payload.pub)
   const macData=new Uint8Array([...te("key:"),...new Uint8Array(peerPub),...te(roomName)])
   const ok=await hmacVerify(authKey, ub64(payload.mac), macData)
@@ -346,7 +350,7 @@ async function onPeerKey(payload){
   msgKey=await hkdfToAesGcm(secret, "salt:"+roomName, "msg")
   regKey=await hkdfToAesGcm(secret, "salt:"+roomName, "registry")
   sharedReady=true
-  console.log("密钥协商完成, sharedReady =", sharedReady)
+  console.log("密钥协商完成, sharedReady =", sharedReady, "与设备:", payload.deviceId)
   await updateLedger()
 }
 
@@ -357,18 +361,33 @@ async function updateLedger(){
     const r=await fetch("/registry/"+encodeURIComponent(roomName))
     if(r.ok){
       const j=await r.json()
-      const dec=await decrypt(regKey, j.ciphertext.c, j.ciphertext.iv)
-      arr=JSON.parse(dec)
+      if(j.ciphertext && j.ciphertext.c && j.ciphertext.iv) {
+        const dec=await decrypt(regKey, j.ciphertext.c, j.ciphertext.iv)
+        arr=JSON.parse(dec)
+      }
     }
-  }catch(_){}
+  }catch(e){
+    console.log("读取设备列表失败:", e)
+  }
   const now=Date.now()
   const map=new Map(arr.map(x=>[x.id,x]))
   map.set(deviceId,{id:deviceId,lastSeen:now})
   const next=[...map.values()]
   renderLedger(next)
-  const s=JSON.stringify(next)
-  const enc=await encrypt(regKey, s)
-  await fetch("/registry/"+encodeURIComponent(roomName),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ciphertext:enc})})
+  try {
+    const s=JSON.stringify(next)
+    const enc=await encrypt(regKey, s)
+    const response = await fetch("/registry/"+encodeURIComponent(roomName),{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ciphertext:enc})
+    })
+    if(!response.ok) {
+      console.log("更新设备列表失败:", response.status)
+    }
+  } catch(e) {
+    console.log("保存设备列表失败:", e)
+  }
 }
 
 document.querySelectorAll(".tab").forEach(tab=>{
