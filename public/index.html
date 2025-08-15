@@ -264,16 +264,26 @@ async function joinRoom(room, password, name, errorEl, isCreate=false){
     // 如果是房间创建者，生成群组密钥
     if(isCreate) {
       console.log("作为房间创建者，生成群组密钥...")
+      console.log("isRoomCreator 设置为:", isCreate)
       const groupKeyMaterial = crypto.getRandomValues(new Uint8Array(32))
       groupMsgKey = await crypto.subtle.importKey("raw", groupKeyMaterial, "AES-GCM", false, ["encrypt", "decrypt"])
       groupRegKey = await hkdfToAesGcm(groupKeyMaterial, "salt:"+room, "registry")
-      console.log("群组密钥生成完成")
+      console.log("群组密钥生成完成, groupMsgKey:", !!groupMsgKey)
       
       // 房间创建者立即设置为ready状态
       sharedReady = true
       msgKey = groupMsgKey  // 设置默认消息密钥
       regKey = groupRegKey
       waitingMessage.style.display="none"
+      
+      console.log("房间创建者初始化完成:")
+      console.log("- sharedReady:", sharedReady)
+      console.log("- groupMsgKey:", !!groupMsgKey)
+      console.log("- msgKey:", !!msgKey)
+      console.log("- isRoomCreator:", isRoomCreator)
+    } else {
+      console.log("作为加入者，等待群组密钥...")
+      console.log("isRoomCreator 设置为:", isCreate)
     }
     
     myKeys=await genECDH()
@@ -408,21 +418,30 @@ async function onPeerKey(payload){
   })
   connectedDevices.add(payload.deviceId)
   
+  console.log("密钥协商后状态检查:")
+  console.log("- isRoomCreator:", isRoomCreator)
+  console.log("- groupMsgKey:", !!groupMsgKey)
+  console.log("- 对方设备ID:", payload.deviceId)
+  
   // 如果是房间创建者，发送群组密钥给新设备
   if(isRoomCreator && groupMsgKey) {
     console.log("房间创建者向设备", payload.deviceId, "发送群组密钥")
     try {
       const groupKeyMaterial = await crypto.subtle.exportKey("raw", groupMsgKey)
       const encryptedGroupKey = await encrypt(deviceTransportKey, b64(groupKeyMaterial))
+      console.log("群组密钥加密成功，准备发送")
       ioClient.emit("groupkey", {
         room: roomName,
         to: payload.deviceId,
         encryptedKey: encryptedGroupKey,
         from: deviceId
       })
+      console.log("群组密钥已发送给设备:", payload.deviceId)
     } catch(e) {
       console.error("发送群组密钥失败:", e)
     }
+  } else if(isRoomCreator && !groupMsgKey) {
+    console.error("房间创建者但没有群组密钥！")
   }
   
   // 如果不是房间创建者，等待接收群组密钥
@@ -516,8 +535,15 @@ document.addEventListener("keydown",e=>{
   }
 })
 $("#send").onclick=async ()=>{
-  console.log("点击发送，当前状态: sharedReady =", sharedReady, "已连接设备:", Array.from(connectedDevices), "设备密钥数:", deviceKeys.size)
-  if(!sharedReady && connectedDevices.size === 0) {
+  console.log("点击发送，当前状态:")
+  console.log("- sharedReady:", sharedReady)
+  console.log("- isRoomCreator:", isRoomCreator)
+  console.log("- groupMsgKey:", !!groupMsgKey)
+  console.log("- msgKey:", !!msgKey)
+  console.log("- 已连接设备:", Array.from(connectedDevices))
+  console.log("- 设备密钥数:", deviceKeys.size)
+  
+  if(!sharedReady && connectedDevices.size === 0 && !isRoomCreator) {
     console.log("发送失败: 无连接设备，sharedReady =", sharedReady, "connectedDevices =", connectedDevices.size)
     addMsg(`<span class="sys">请等待其他人加入房间后再发送消息</span>`)
     return
@@ -533,9 +559,16 @@ $("#send").onclick=async ()=>{
   
   // 使用群组密钥加密消息
   const keyToUse = groupMsgKey || msgKey
+  if(!keyToUse) {
+    console.error("发送失败: 没有可用的加密密钥")
+    addMsg(`<span class="sys">加密密钥未就绪，请稍后重试</span>`)
+    return
+  }
+  
+  console.log("使用密钥类型:", keyToUse === groupMsgKey ? "群组密钥" : "默认密钥")
   const enc=await encrypt(keyToUse, t)
   const msgData = { c:enc.c, iv:enc.iv, from:deviceId, ts:Date.now() }
-  console.log("使用群组密钥发送加密消息:", msgData)
+  console.log("发送加密消息:", msgData)
   ioClient.emit("msg", msgData)
   $("#text").value=""
 }
