@@ -324,17 +324,29 @@ function hideSecurityModal(){
 }
 
 async function onPeerKey(payload){
-  if(!myKeys) return
-  if(payload.room!==roomName) return
+  console.log("收到对方公钥:", payload)
+  if(!myKeys) {
+    console.log("密钥交换失败: myKeys 不存在")
+    return
+  }
+  if(payload.room!==roomName) {
+    console.log("密钥交换失败: 房间不匹配", payload.room, "vs", roomName)
+    return
+  }
   const peerPub=ub64(payload.pub)
   const macData=new Uint8Array([...te("key:"),...new Uint8Array(peerPub),...te(roomName)])
   const ok=await hmacVerify(authKey, ub64(payload.mac), macData)
-  if(!ok) return
+  if(!ok) {
+    console.log("密钥交换失败: MAC验证失败")
+    return
+  }
+  console.log("MAC验证成功，开始密钥协商...")
   const pub=await importRawPub(peerPub)
   const secret=await deriveECDHBits(myKeys.privateKey, pub)
   msgKey=await hkdfToAesGcm(secret, "salt:"+roomName, "msg")
   regKey=await hkdfToAesGcm(secret, "salt:"+roomName, "registry")
   sharedReady=true
+  console.log("密钥协商完成, sharedReady =", sharedReady)
   await updateLedger()
 }
 
@@ -385,11 +397,17 @@ document.addEventListener("keydown",e=>{
   }
 })
 $("#send").onclick=async ()=>{
-  if(!sharedReady) return
+  if(!sharedReady) {
+    console.log("发送失败: sharedReady =", sharedReady)
+    return
+  }
   const t=$("#text").value.trim()
   if(!t) return
+  console.log("发送消息:", t)
   const enc=await encrypt(msgKey, t)
-  ioClient.emit("msg",{ c:enc.c, iv:enc.iv, from:deviceId, ts:Date.now() })
+  const msgData = { c:enc.c, iv:enc.iv, from:deviceId, ts:Date.now() }
+  console.log("发送加密消息:", msgData)
+  ioClient.emit("msg", msgData)
   $("#text").value=""
 }
 $("#text").addEventListener("keydown",async e=>{ if(e.key==="Enter"){ $("#send").click() } })
@@ -397,14 +415,22 @@ $("#text").addEventListener("keydown",async e=>{ if(e.key==="Enter"){ $("#send")
 ioClient.on("system",t=>addMsg(`<span class="sys">${t}</span>`))
 ioClient.on("pubkey",onPeerKey)
 ioClient.on("msg",async m=>{
-  if(!sharedReady) return
+  console.log("收到消息:", m)
+  if(!sharedReady) {
+    console.log("消息处理失败: sharedReady =", sharedReady)
+    return
+  }
   try{
+    console.log("尝试解密消息...")
     const plain=await decrypt(msgKey, m.c, m.iv)
+    console.log("解密成功:", plain)
     const dt=new Date(m.ts)
     const hh=String(dt.getHours()).padStart(2,"0"), mm=String(dt.getMinutes()).padStart(2,"0")
     addMsg(`<span class="meta">[${hh}:${mm}]</span> <b>${m.from}</b>: ${escapeHtml(plain)}`, m.from===deviceId?"me":"")
     await updateLedger()
-  }catch(_){}
+  }catch(e){
+    console.error("消息解密失败:", e)
+  }
 })
 
 function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
