@@ -120,6 +120,18 @@ const devSpan=$("#mydev")
 const createErr=$("#create-err")
 const securityModal=$("#security-modal")
 const ioClient=io()
+
+ioClient.on("connect", ()=>{
+  console.log("Socket.IO connected:", ioClient.id)
+})
+
+ioClient.on("disconnect", (reason)=>{
+  console.log("Socket.IO disconnected:", reason)
+})
+
+ioClient.on("connect_error", (error)=>{
+  console.error("Socket.IO connection error:", error)
+})
 const te=s=>new TextEncoder().encode(s)
 const td=b=>new TextDecoder().decode(b)
 function b64(a){return btoa(String.fromCharCode(...new Uint8Array(a)))}
@@ -204,9 +216,19 @@ function renderLedger(devs){
 }
 
 async function joinRoom(room, password, name, errorEl, isCreate=false){
+  console.log("joinRoom called:", {room, isCreate, socketConnected: ioClient.connected})
+  
+  if(!ioClient.connected){
+    errorEl.textContent="连接服务器失败，请刷新页面重试"
+    return
+  }
+  
   const joinBytes=await derivePBKDF2Bytes(password, "join:"+room, 32)
   const joinToken=b64(joinBytes)
+  console.log("发送join请求...")
+  
   ioClient.emit("join",{room,name,joinToken,create:isCreate}, async res=>{
+    console.log("join响应:", res)
     if(!res.ok){
       let errMsg="信息不完整"
       if(res.error==="auth") errMsg="密码不匹配"
@@ -250,7 +272,9 @@ async function startJoin(){
   const room=$("#room").value.trim()
   const password=$("#pass").value
   const name=$("#name").value.trim()
+  console.log("startJoin called:", {room, password: password?"[有密码]":"[无密码]", name})
   if(!room||!password||!name){err.textContent="信息不完整";return}
+  err.textContent="正在连接..."
   await joinRoom(room, password, name, err)
 }
 
