@@ -358,6 +358,10 @@ async function onPeerKey(payload){
   waitingMessage.style.display="none"
   console.log("密钥协商完成, sharedReady =", sharedReady, "与设备:", payload.deviceId)
   addMsg(`<span class="sys">与设备 ${payload.deviceId} 建立安全连接</span>`)
+  
+  // 发送确认消息，确保对方也知道连接已建立
+  ioClient.emit("ready", { room: roomName, deviceId })
+  
   await updateLedger()
 }
 
@@ -441,6 +445,13 @@ $("#text").addEventListener("keydown",async e=>{ if(e.key==="Enter"){ $("#send")
 
 ioClient.on("system",t=>addMsg(`<span class="sys">${t}</span>`))
 ioClient.on("pubkey",onPeerKey)
+ioClient.on("ready", payload => {
+  console.log("收到对方ready确认:", payload)
+  if(payload.room === roomName && sharedReady) {
+    waitingMessage.style.display="none"
+    console.log("双方连接确认完成")
+  }
+})
 ioClient.on("msg",async m=>{
   console.log("收到消息:", m)
   if(!sharedReady) {

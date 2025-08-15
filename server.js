@@ -84,8 +84,6 @@ io.on("connection", socket => {
     socket.data.name = name
     r.users.add(socket.id)
     socket.join(room)
-    console.log(`[${new Date().toISOString()}] 用户 ${name}(${socket.id}) 加入房间 ${room}，当前用户数: ${r.users.size}`)
-    console.log(`房间 ${room} 中的所有用户:`, Array.from(r.users))
     io.to(room).emit("system", `${name} 加入`)
     cb({ ok: true })
   })
@@ -93,19 +91,19 @@ io.on("connection", socket => {
   socket.on("pubkey", payload => {
     const room = socket.data.room
     if (!room) return
-    console.log(`[${new Date().toISOString()}] 转发公钥 房间:${room} 从:${socket.id}`)
     io.to(room).emit("pubkey", payload)
   })
 
   socket.on("msg", payload => {
     const room = socket.data.room
     if (!room) return
-    const roomData = rooms.get(room)
-    console.log(`[${new Date().toISOString()}] 转发消息 房间:${room} 从:${socket.id} 房间用户数:${roomData ? roomData.users.size : 0}`)
-    if (roomData) {
-      console.log(`房间 ${room} 中的用户:`, Array.from(roomData.users))
-    }
     io.to(room).emit("msg", payload)
+  })
+
+  socket.on("ready", payload => {
+    const room = socket.data.room
+    if (!room) return
+    io.to(room).emit("ready", payload)
   })
 
   socket.on("disconnect", () => {
