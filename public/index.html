@@ -376,12 +376,26 @@ async function onPeerKey(payload){
   msgKey=await hkdfToAesGcm(secret, "salt:"+roomName, "msg")
   regKey=await hkdfToAesGcm(secret, "salt:"+roomName, "registry")
   sharedReady=true
-  waitingMessage.style.display="none"
+  
+  // 强制隐藏等待提示
+  if(waitingMessage) {
+    waitingMessage.style.display="none"
+    console.log("强制隐藏等待提示")
+  }
+  
   console.log("密钥协商完成, sharedReady =", sharedReady, "与设备:", payload.deviceId)
   addMsg(`<span class="sys">与设备 ${payload.deviceId} 建立安全连接</span>`)
   
   // 发送确认消息，确保对方也知道连接已建立
   ioClient.emit("ready", { room: roomName, deviceId })
+  
+  // 延迟再次检查UI状态，确保等待提示被隐藏
+  setTimeout(() => {
+    if(sharedReady && waitingMessage && waitingMessage.style.display !== "none") {
+      console.log("延迟检查：强制隐藏等待提示")
+      waitingMessage.style.display="none"
+    }
+  }, 2000)
   
   await updateLedger()
 }
@@ -448,10 +462,16 @@ document.addEventListener("keydown",e=>{
   }
 })
 $("#send").onclick=async ()=>{
+  console.log("点击发送，当前状态: sharedReady =", sharedReady)
   if(!sharedReady) {
     console.log("发送失败: sharedReady =", sharedReady)
     addMsg(`<span class="sys">请等待其他人加入房间后再发送消息</span>`)
     return
+  }
+  
+  // 确保等待提示已隐藏
+  if(waitingMessage) {
+    waitingMessage.style.display="none"
   }
   const t=$("#text").value.trim()
   if(!t) return
@@ -469,7 +489,11 @@ ioClient.on("pubkey",onPeerKey)
 ioClient.on("ready", payload => {
   console.log("收到对方ready确认:", payload)
   if(payload.room === roomName) {
-    waitingMessage.style.display="none"
+    // 强制隐藏等待提示
+    if(waitingMessage) {
+      waitingMessage.style.display="none"
+      console.log("通过ready事件强制隐藏等待提示")
+    }
     console.log("双方连接确认完成")
     if(!sharedReady) {
       console.log("对方已准备就绪，但本地sharedReady仍为false，可能存在密钥交换问题")
