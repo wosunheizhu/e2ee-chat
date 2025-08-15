@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>E2EE Chat</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#0b0c10;color:#eaeaea}
+.wrap{max-width:780px;margin:40px auto;padding:16px}
+.card{background:#15171c;border:1px solid #22252b;border-radius:16px;padding:16px}
+.row{display:flex;gap:8px}
+input,button{padding:12px;border-radius:12px;border:1px solid #2a2f37;background:#0f1115;color:#eaeaea;outline:none}
+button{cursor:pointer}
+#chat{display:none;flex-direction:column;gap:12px}
+#list{height:360px;overflow:auto;background:#0f1115;border:1px solid #2a2f37;border-radius:12px;padding:12px}
+.msg{margin:6px 0}
+.me{color:#7bd389}
+.sys{color:#7aa2f7}
+.meta{opacity:.6;font-size:.85em}
+.ledger{background:#0f1115;border:1px solid #2a2f37;border-radius:12px;padding:12px;max-height:120px;overflow:auto}
+.small{font-size:.9em;opacity:.9}
+.tabs{display:flex;margin-bottom:16px}
+.tab{flex:1;padding:8px 16px;text-align:center;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s}
+.tab.active{border-bottom-color:#7aa2f7;color:#7aa2f7}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.generate-btn{background:#7aa2f7;color:#0b0c10;border:1px solid #7aa2f7}
+.generate-btn:hover{background:#9bb9f7}
+.room-info{background:#0f1115;border:1px solid #2a2f37;border-radius:12px;padding:12px;margin:8px 0}
+.copy-btn{background:#7bd389;color:#0b0c10;border:1px solid #7bd389;padding:8px 12px;font-size:0.9em}
+.copy-btn:hover{background:#8ee396}
+.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);display:none;justify-content:center;align-items:center;z-index:1000}
+.modal-content{background:#15171c;border:1px solid #22252b;border-radius:16px;padding:24px;max-width:500px;width:90%;position:relative}
+.modal-header{font-size:1.2em;font-weight:bold;margin-bottom:16px;color:#7aa2f7}
+.modal-body{line-height:1.6;margin-bottom:20px}
+.modal-body h4{color:#7bd389;margin:12px 0 8px 0;font-size:1em}
+.modal-body ul{margin:8px 0;padding-left:20px}
+.modal-body li{margin:4px 0;color:#c9c9c9}
+.modal-close{background:#7aa2f7;color:#0b0c10;border:1px solid #7aa2f7;padding:10px 20px;border-radius:8px;cursor:pointer;float:right}
+.modal-close:hover{background:#9bb9f7}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div id="gate">
+      <div class="tabs">
+        <div class="tab active" data-tab="join">加入房间</div>
+        <div class="tab" data-tab="create">创建房间</div>
+      </div>
+      
+      <div id="join-tab" class="tab-content active">
+        <div class="row" style="flex-direction:column;gap:12px">
+          <input id="room" placeholder="房间号"/>
+          <input id="pass" placeholder="房间密码" type="password"/>
+          <input id="name" placeholder="你的昵称"/>
+          <button id="enter">进入房间</button>
+          <div id="err" class="meta"></div>
+        </div>
+      </div>
+      
+      <div id="create-tab" class="tab-content">
+        <div class="row" style="flex-direction:column;gap:12px">
+          <input id="create-room" placeholder="房间号（留空自动生成）"/>
+          <input id="create-pass" placeholder="设置房间密码" type="password"/>
+          <input id="create-name" placeholder="你的昵称"/>
+          <button id="generate" class="generate-btn">生成随机房间</button>
+          <button id="create-enter">创建并进入</button>
+          <div id="create-err" class="meta"></div>
+          <div id="room-info" class="room-info" style="display:none">
+            <div class="small">房间信息：</div>
+            <div>房间号：<span id="generated-room"></span> <button id="copy-room" class="copy-btn">复制</button></div>
+            <div>密码：<span id="generated-pass"></span> <button id="copy-pass" class="copy-btn">复制</button></div>
+            <div class="small" style="margin-top:8px">请将房间号和密码分享给其他人</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="small" style="margin-top:12px">你的设备编号：<span id="mydev"></span></div>
+    </div>
+    <div id="chat">
+      <div class="small">曾登录的设备编号：</div>
+      <div id="ledger" class="ledger"></div>
+      <div id="list"></div>
+      <div class="row">
+        <input id="text" placeholder="输入消息，回车发送" style="flex:1"/>
+        <button id="send">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="security-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      安全聊天室
+    </div>
+    <div class="modal-body">
+      <p>您的消息受到端到端加密保护：</p>
+      
+      <h4>消息安全</h4>
+      <ul>
+        <li>所有消息在您的设备上加密后才发送</li>
+        <li>只有拥有正确密码的设备才能解密查看</li>
+        <li>服务器无法看到您的消息内容</li>
+      </ul>
+      
+      <h4>密码保护</h4>
+      <ul>
+        <li>房间密码经过强化处理，服务器无法获取原始密码</li>
+        <li>每次会话都会生成新的加密密钥</li>
+      </ul>
+      
+      <div style="margin-top:16px;padding:12px;background:#0f1115;border-radius:8px;border-left:3px solid #7bd389;">
+        <strong>重要：</strong>请妥善保管房间密码，丢失后无法恢复消息。
+      </div>
+    </div>
+    <button class="modal-close" id="close-security-modal">我知道了</button>
+    <div style="clear:both"></div>
+  </div>
+</div>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+const $=s=>document.querySelector(s)
+const gate=$("#gate"),chat=$("#chat"),list=$("#list"),err=$("#err"),ledgerBox=$("#ledger")
+const devSpan=$("#mydev")
+const createErr=$("#create-err"),roomInfo=$("#room-info")
+const securityModal=$("#security-modal")
+const ioClient=io()
+const te=s=>new TextEncoder().encode(s)
+const td=b=>new TextDecoder().decode(b)
+function b64(a){return btoa(String.fromCharCode(...new Uint8Array(a)))}
+function ub64(s){const b=atob(s);const a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a.buffer}
+function hexOf(buf){return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,"0")).join("")}
+function rid(n=16){const a=new Uint8Array(n);crypto.getRandomValues(a);return [...a].map(x=>x.toString(16).padStart(2,"0")).join("")}
+function generateRoomId(){return rid(4).toUpperCase()}
+function generatePassword(){const chars="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";let result="";for(let i=0;i<8;i++){result+=chars.charAt(Math.floor(Math.random()*chars.length))}return result}
+let deviceId=localStorage.getItem("deviceId");if(!deviceId){deviceId=rid(8);localStorage.setItem("deviceId",deviceId)}
+devSpan.textContent=deviceId
+
+let myKeys=null
+let sharedReady=false
+let msgKey=null
+let regKey=null
+let authKey=null
+let roomName=null
+let userName=null
+
+async function derivePBKDF2Key(password, salt, usage, length=32){
+  const base=await crypto.subtle.importKey("raw", te(password), "PBKDF2", false, ["deriveBits","deriveKey"])
+  return crypto.subtle.deriveKey({name:"PBKDF2",salt:te(salt),iterations:100000,hash:"SHA-256"}, base, {name:usage,length:length*8}, false, ["encrypt","decrypt"])
+}
+
+async function derivePBKDF2Bytes(password, salt, length=32){
+  const base=await crypto.subtle.importKey("raw", te(password), "PBKDF2", false, ["deriveBits"])
+  const bits=await crypto.subtle.deriveBits({name:"PBKDF2",salt:te(salt),iterations:100000,hash:"SHA-256"}, base, length*8)
+  return bits
+}
+
+async function importHmacKey(raw){
+  return crypto.subtle.importKey("raw", raw, {name:"HMAC",hash:"SHA-256"}, false, ["sign","verify"])
+}
+
+async function hkdfToAesGcm(secret, saltStr, infoStr){
+  const salt=await crypto.subtle.digest("SHA-256", te(saltStr))
+  const ikm=await crypto.subtle.importKey("raw", secret, "HKDF", false, ["deriveKey"])
+  return crypto.subtle.deriveKey({name:"HKDF",hash:"SHA-256",salt,info:te(infoStr)}, ikm, {name:"AES-GCM",length:256}, false, ["encrypt","decrypt"])
+}
+
+async function genECDH(){
+  return crypto.subtle.generateKey({name:"ECDH",namedCurve:"P-256"}, true, ["deriveBits"])
+}
+
+async function exportRawPub(k){
+  return crypto.subtle.exportKey("raw", k.publicKey)
+}
+
+async function importRawPub(raw){
+  return crypto.subtle.importKey("raw", raw, {name:"ECDH",namedCurve:"P-256"}, false, [])
+}
+
+async function deriveECDHBits(priv, pub){
+  return crypto.subtle.deriveBits({name:"ECDH",public:pub}, priv, 256)
+}
+
+async function hmacSign(key, data){
+  return crypto.subtle.sign("HMAC", key, data)
+}
+
+async function hmacVerify(key, sig, data){
+  return crypto.subtle.verify("HMAC", key, sig, data)
+}
+
+async function encrypt(key, plain){
+  const iv=new Uint8Array(12);crypto.getRandomValues(iv)
+  const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv}, key, te(plain))
+  return { c:b64(ct), iv:b64(iv.buffer) }
+}
+
+async function decrypt(key, c, iv){
+  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:new Uint8Array(ub64(iv)),name:"AES-GCM"}, key, ub64(c))
+  return td(pt)
+}
+
+function addMsg(t,c){const d=document.createElement("div");d.className="msg "+(c||"");d.innerHTML=t;list.appendChild(d);list.scrollTop=list.scrollHeight}
+function renderLedger(devs){
+  ledgerBox.innerHTML=""
+  devs.sort((a,b)=>b.lastSeen-a.lastSeen).forEach(x=>{
+    const d=document.createElement("div");d.textContent=x.id+"  "+new Date(x.lastSeen).toLocaleString();ledgerBox.appendChild(d)
+  })
+}
+
+async function joinRoom(room, password, name, errorEl, isCreate=false){
+  const joinBytes=await derivePBKDF2Bytes(password, "join:"+room, 32)
+  const joinToken=b64(joinBytes)
+  ioClient.emit("join",{room,name,joinToken,create:isCreate}, async res=>{
+    if(!res.ok){
+      let errMsg="信息不完整"
+      if(res.error==="auth") errMsg="密码不匹配"
+      else if(res.error==="exists") errMsg="房间号已存在，请选择其他房间号"
+      else if(res.error==="notfound") errMsg="房间不存在，请检查房间号"
+      errorEl.textContent=errMsg
+      return
+    }
+    errorEl.textContent=""
+    roomName=room
+    userName=name
+    gate.style.display="none"
+    chat.style.display="flex"
+    setTimeout(showSecurityModal, 500)
+    const authBytes=await derivePBKDF2Bytes(password, "auth:"+room, 32)
+    authKey=await importHmacKey(authBytes)
+    myKeys=await genECDH()
+    const myPub=await exportRawPub(myKeys)
+    const mac=await hmacSign(authKey, new Uint8Array([...te("key:"),...new Uint8Array(myPub),...te(room)]))
+    ioClient.emit("pubkey",{ room, pub:b64(myPub), mac:b64(mac), deviceId })
+    try {
+      const r=await fetch("/registry/"+encodeURIComponent(room))
+      if(r.ok){
+        const j=await r.json()
+        const waitPeer=setInterval(async ()=>{
+          if(sharedReady){
+            try{
+              const dec=await decrypt(regKey, j.ciphertext.c, j.ciphertext.iv)
+              const arr=JSON.parse(dec)
+              renderLedger(arr)
+            }catch(_){}
+            clearInterval(waitPeer)
+          }
+        },200)
+      }
+    } catch(_){}
+  })
+}
+
+async function startJoin(){
+  const room=$("#room").value.trim()
+  const password=$("#pass").value
+  const name=$("#name").value.trim()
+  if(!room||!password||!name){err.textContent="信息不完整";return}
+  await joinRoom(room, password, name, err)
+}
+
+async function createRoom(){
+  let room=$("#create-room").value.trim()
+  const password=$("#create-pass").value
+  const name=$("#create-name").value.trim()
+  if(!password||!name){createErr.textContent="请设置密码和昵称";return}
+  
+  if(!room){
+    let attempts=0
+    do {
+      room=generateRoomId()
+      attempts++
+      if(attempts>10){createErr.textContent="生成房间号失败，请稍后重试";return}
+      try {
+        const r=await fetch("/room/"+encodeURIComponent(room)+"/exists")
+        const j=await r.json()
+        if(!j.exists) break
+      } catch(_){break}
+    } while(true)
+  } else {
+    try {
+      const r=await fetch("/room/"+encodeURIComponent(room)+"/exists")
+      const j=await r.json()
+      if(j.exists){createErr.textContent="房间号已存在，请选择其他房间号";return}
+    } catch(_){}
+  }
+  
+  $("#create-room").value=room
+  $("#generated-room").textContent=room
+  $("#generated-pass").textContent=password
+  roomInfo.style.display="block"
+  await joinRoom(room, password, name, createErr, true)
+}
+
+function generateRoom(){
+  $("#create-room").value=generateRoomId()
+  $("#create-pass").value=generatePassword()
+}
+
+function showSecurityModal(){
+  securityModal.style.display="flex"
+}
+
+function hideSecurityModal(){
+  securityModal.style.display="none"
+}
+
+async function onPeerKey(payload){
+  if(!myKeys) return
+  if(payload.room!==roomName) return
+  const peerPub=ub64(payload.pub)
+  const macData=new Uint8Array([...te("key:"),...new Uint8Array(peerPub),...te(roomName)])
+  const ok=await hmacVerify(authKey, ub64(payload.mac), macData)
+  if(!ok) return
+  const pub=await importRawPub(peerPub)
+  const secret=await deriveECDHBits(myKeys.privateKey, pub)
+  msgKey=await hkdfToAesGcm(secret, "salt:"+roomName, "msg")
+  regKey=await hkdfToAesGcm(secret, "salt:"+roomName, "registry")
+  sharedReady=true
+  await updateLedger()
+}
+
+async function updateLedger(){
+  if(!sharedReady) return
+  let arr=[]
+  try{
+    const r=await fetch("/registry/"+encodeURIComponent(roomName))
+    if(r.ok){
+      const j=await r.json()
+      const dec=await decrypt(regKey, j.ciphertext.c, j.ciphertext.iv)
+      arr=JSON.parse(dec)
+    }
+  }catch(_){}
+  const now=Date.now()
+  const map=new Map(arr.map(x=>[x.id,x]))
+  map.set(deviceId,{id:deviceId,lastSeen:now})
+  const next=[...map.values()]
+  renderLedger(next)
+  const s=JSON.stringify(next)
+  const enc=await encrypt(regKey, s)
+  await fetch("/registry/"+encodeURIComponent(roomName),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ciphertext:enc})})
+}
+
+document.querySelectorAll(".tab").forEach(tab=>{
+  tab.onclick=()=>{
+    document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"))
+    document.querySelectorAll(".tab-content").forEach(t=>t.classList.remove("active"))
+    tab.classList.add("active")
+    $("#"+tab.dataset.tab+"-tab").classList.add("active")
+  }
+})
+
+$("#enter").onclick=startJoin
+$("#create-enter").onclick=createRoom
+$("#generate").onclick=generateRoom
+$("#copy-room").onclick=()=>navigator.clipboard.writeText($("#generated-room").textContent)
+$("#copy-pass").onclick=()=>navigator.clipboard.writeText($("#generated-pass").textContent)
+$("#close-security-modal").onclick=hideSecurityModal
+
+securityModal.onclick=(e)=>{
+  if(e.target===securityModal) hideSecurityModal()
+}
+
+document.addEventListener("keydown",e=>{
+  if(e.key==="Enter" && gate.style.display!=="none"){
+    if($("#join-tab").classList.contains("active")) startJoin()
+    else if($("#create-tab").classList.contains("active")) createRoom()
+  }
+})
+$("#send").onclick=async ()=>{
+  if(!sharedReady) return
+  const t=$("#text").value.trim()
+  if(!t) return
+  const enc=await encrypt(msgKey, t)
+  ioClient.emit("msg",{ c:enc.c, iv:enc.iv, from:deviceId, ts:Date.now() })
+  $("#text").value=""
+}
+$("#text").addEventListener("keydown",async e=>{ if(e.key==="Enter"){ $("#send").click() } })
+
+ioClient.on("system",t=>addMsg(`<span class="sys">${t}</span>`))
+ioClient.on("pubkey",onPeerKey)
+ioClient.on("msg",async m=>{
+  if(!sharedReady) return
+  try{
+    const plain=await decrypt(msgKey, m.c, m.iv)
+    const dt=new Date(m.ts)
+    const hh=String(dt.getHours()).padStart(2,"0"), mm=String(dt.getMinutes()).padStart(2,"0")
+    addMsg(`<span class="meta">[${hh}:${mm}]</span> <b>${m.from}</b>: ${escapeHtml(plain)}`, m.from===deviceId?"me":"")
+    await updateLedger()
+  }catch(_){}
+})
+
+function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+</script>
+</body>
+</html>
