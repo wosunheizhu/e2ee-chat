@@ -18,13 +18,27 @@ app.use(express.json({ limit: "256kb" }))
 
 const rooms = new Map()
 let registryStore = {}
+let roomStore = {}
 const dataFile = path.join(__dirname, "data.json")
 if (fs.existsSync(dataFile)) {
-  try { registryStore = JSON.parse(fs.readFileSync(dataFile, "utf8") || "{}") } catch (_) {}
+  try { 
+    const data = JSON.parse(fs.readFileSync(dataFile, "utf8") || "{}")
+    registryStore = data.registry || {}
+    roomStore = data.rooms || {}
+    Object.entries(roomStore).forEach(([roomName, roomData]) => {
+      rooms.set(roomName, { hash: roomData.hash, users: new Set() })
+    })
+  } catch (_) {}
 }
 
-function saveRegistry() {
-  try { fs.writeFileSync(dataFile, JSON.stringify(registryStore)) } catch (_) {}
+function saveData() {
+  try { 
+    const data = {
+      registry: registryStore,
+      rooms: roomStore
+    }
+    fs.writeFileSync(dataFile, JSON.stringify(data)) 
+  } catch (_) {}
 }
 
 app.get("/registry/:room", (req, res) => {
@@ -39,7 +53,7 @@ app.post("/registry/:room", (req, res) => {
   const { ciphertext } = req.body || {}
   if (typeof ciphertext !== "string" || ciphertext.length === 0) return res.status(400).json({ ok: false })
   registryStore[room] = { ciphertext, updatedAt: Date.now() }
-  saveRegistry()
+  saveData()
   res.json({ ok: true })
 })
 
@@ -57,6 +71,8 @@ io.on("connection", socket => {
       if (rooms.has(room)) return cb({ ok: false, error: "exists" })
       const hash = await bcrypt.hash(joinToken, 10)
       rooms.set(room, { hash, users: new Set() })
+      roomStore[room] = { hash, createdAt: Date.now() }
+      saveData()
     } else {
       if (!rooms.has(room)) return cb({ ok: false, error: "notfound" })
     }
